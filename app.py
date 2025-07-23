@@ -1,73 +1,82 @@
 import fitz  # PyMuPDF
-import re
 
-def normalize_font_family(font_name):
-    font_name = font_name.lower()
-    font_name = re.sub(r'(mt|psmt|bold|italic|regular|medium|light|semibold)', '', font_name)
-    font_name = re.sub(r'[^a-z]', '', font_name)
-    return font_name
+def spans_can_merge_by_y(span1, span2, y_tolerance=1.0):
+    return abs(span1["origin"][1] - span2["origin"][1]) < y_tolerance
 
-pdf_path = "file03-2.pdf"
-doc = fitz.open(pdf_path)
+def spans_can_merge_by_font_and_x(span1, span2):
+    return (
+        span1["font"] == span2["font"] and
+        span1["size"] == span2["size"] and
+        span1["color"] == span2["color"] and
+        span2["origin"][0] >= span1["origin"][0]
+    )
 
-print(f"Number of pages: {len(doc)}\n")
+def merge_spans(span1, span2, with_space=True):
+    return {
+        "text": span1["text"] + (" " if with_space else "") + span2["text"],
+        "font": span1["font"],
+        "size": span1["size"],
+        "color": span1["color"],
+        "origin": span1["origin"],
+    }
 
-for page_number, page in enumerate(doc, start=1):
-    print(f"\n--- Page {page_number} ---\n")
-    
-    blocks = page.get_text("dict")["blocks"]
-    
-    for block_index, block in enumerate(blocks):
-        if "lines" not in block:
-            continue
+def extract_pdf_info(pdf_path):
+    doc = fitz.open(pdf_path)
 
-        # Flatten spans in block
-        all_spans = []
-        for line in block["lines"]:
-            all_spans.extend(line["spans"])
+    for page_num, page in enumerate(doc, start=1):
+        blocks = page.get_text("dict")["blocks"]
+        final_spans = []
 
-        merged_spans = []
-        prev_span = None
+        for block_index, block in enumerate(blocks):
+            if "lines" not in block:
+                continue
 
-        for span_index, span in enumerate(all_spans):
-            text = span["text"]
-            raw_font = span["font"]
-            font_family = normalize_font_family(raw_font)
-            size = span["size"]
+            raw_spans = []
+            for line in block["lines"]:
+                for span in line["spans"]:
+                    text = span.get("text", "").strip()
+                    if text:
+                        raw_spans.append(span)
+
+            # Step 1: Merge by Y within block
+            y_merged_spans = []
+            i = 0
+            while i < len(raw_spans):
+                current = raw_spans[i]
+                while i + 1 < len(raw_spans) and spans_can_merge_by_y(current, raw_spans[i + 1]):
+                    current = merge_spans(current, raw_spans[i + 1])
+                    i += 1
+                y_merged_spans.append(current)
+                i += 1
+
+            # Step 2: Merge by font and X within block
+            i = 0
+            while i < len(y_merged_spans):
+                current = y_merged_spans[i]
+                while i + 1 < len(y_merged_spans) and spans_can_merge_by_font_and_x(current, y_merged_spans[i + 1]):
+                    current = merge_spans(current, y_merged_spans[i + 1])
+                    i += 1
+                final_spans.append(current)
+                i += 1
+
+        # Print results
+        for idx, span in enumerate(final_spans):
+            font = span.get("font", "")
+            size = span.get("size", 0)
             color = span.get("color", 0)
+            x, y = span.get("origin", (0, 0))
+            text = span.get("text", "")
 
-            if prev_span is None:
-                prev_span = {
-                    "text": text,
-                    "font_family": font_family,
-                    "size": size,
-                    "color": color
-                }
-            else:
-                if (
-                    font_family == prev_span["font_family"]
-                    and abs(size - prev_span["size"]) < 0.01
-                ):
-                    prev_span["text"] += " " + text
-                else:
-                    merged_spans.append(prev_span)
-                    prev_span = {
-                        "text": text,
-                        "font_family": font_family,
-                        "size": size,
-                        "color": color
-                    }
+            print("--------------------------------------------------")
+            print(f"🟩 Text: {text}")
+            print(f" Font Family: {font}")
+            print(f" Font Style: {'bold' if 'Bold' in font else 'normal'}")
+            print(f" Size: {size}")
+            print(f" Color: {color}")
+            print(f" Indentation X: {x}")
+            print(f" Indentation Y: {y}")
+            print(f" Page: {page_num}, Merged Span: {idx}")
+            print("--------------------------------------------------")
 
-        if prev_span:
-            merged_spans.append(prev_span)
-
-        # Print result
-        for i, span in enumerate(merged_spans):
-            print(f"Merged Text: {span['text']}")
-            print(f" Font Family: {span['font_family']}")
-            print(f" Size: {span['size']}")
-            print(f" Color: {span['color']}")
-            print(f" Page: {page_number}, Block: {block_index}, Merged Span: {i}")
-            print("-" * 50)
-
-doc.close()
+# 🔽 Replace with your actual file path
+extract_pdf_info("file03-5.pdf")
