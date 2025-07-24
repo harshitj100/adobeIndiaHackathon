@@ -55,13 +55,17 @@ def extract_pdf_info(pdf_path):
             if idx in skip_indices:
                 continue
             if is_heading(span):
+                # ✅ Skip if X-indentation is more than 200
+                if span["origin"][0] > 200:
+                    continue
+
                 print("--------------------------------------------------")
                 print(f"🟩 Text: {span['text']}")
-                print(f" Font: {span['font']}")
-                print(f" Style: {'bold' if 'bold' in span['font'].lower() else 'normal'}")
-                print(f" Size: {span['size']}")
-                print(f" Color: {span['color']}")
-                print(f" X: {span['origin'][0]}")
-                print(f" Y: {span['origin'][1]}")
-                print(f" Page: {page_num}, Span #: {idx}")
+                # print(f" Font: {span['font']}")
+                # print(f" Style: {'bold' if 'bold' in span['font'].lower() else 'normal'}")
+                # print(f" Size: {span['size']}")
+                # print(f" Color: {span['color']}")
+                # print(f" X: {span['origin'][0]}")
+                # print(f" Y: {span['origin'][1]}")
+                # print(f" Page: {page_num}, Span #: {idx}")
                 print("--------------------------------------------------")
