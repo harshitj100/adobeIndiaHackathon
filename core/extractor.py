@@ -5,8 +5,9 @@ from utils.text_merge import (
 from utils.font_utils import has_similar_font_properties
 from utils.heading_rules import is_heading
 
-def extract_pdf_info(pdf_path):
+def extract_pdf_headings(pdf_path):
     doc = fitz.open(pdf_path)
+    all_headings = []
 
     for page_num, page in enumerate(doc, start=1):
         blocks = page.get_text("dict")["blocks"]
@@ -55,17 +56,56 @@ def extract_pdf_info(pdf_path):
             if idx in skip_indices:
                 continue
             if is_heading(span):
-                # ✅ Skip if X-indentation is more than 200
                 if span["origin"][0] > 200:
                     continue
 
-                print("--------------------------------------------------")
-                print(f"🟩 Text: {span['text']}")
-                # print(f" Font: {span['font']}")
-                # print(f" Style: {'bold' if 'bold' in span['font'].lower() else 'normal'}")
-                # print(f" Size: {span['size']}")
-                # print(f" Color: {span['color']}")
-                # print(f" X: {span['origin'][0]}")
-                # print(f" Y: {span['origin'][1]}")
-                # print(f" Page: {page_num}, Span #: {idx}")
-                print("--------------------------------------------------")
+                heading_data = {
+                    "text": span["text"].strip(),
+                    "page": page_num,
+                    "y": span["origin"][1],
+                    "span": span
+                }
+                all_headings.append(heading_data)
+
+    return all_headings
+
+def extract_pdf_content(file_path, headings):
+    doc = fitz.open(file_path)
+
+    # Sort headings by page and vertical position
+    headings_sorted = sorted(headings, key=lambda h: (h["page"], h.get("y", 0)))
+
+    # Add a dummy ending heading to capture the last section
+    dummy_end = {"page": doc.page_count, "text": "END_OF_DOCUMENT", "y": float('inf')}
+    headings_sorted.append(dummy_end)
+
+    content_blocks = []
+
+    for i in range(len(headings_sorted) - 1):
+        current = headings_sorted[i]
+        next_heading = headings_sorted[i + 1]
+
+        content = []
+        for page_num in range(current["page"], next_heading["page"] + 1):
+            page = doc.load_page(page_num - 1)
+            blocks = page.get_text("dict")["blocks"]
+            for block in blocks:
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        y = span["origin"][1]
+
+                        if page_num == current["page"] and y <= current.get("y", 0):
+                            continue  # skip text before current heading
+                        if page_num == next_heading["page"] and y >= next_heading.get("y", float("inf")):
+                            continue  # skip text after next heading
+
+                        content.append(span["text"])
+
+        content_blocks.append({
+            "heading": current["text"],
+            "content": " ".join(content).strip(),
+            "page_start": current["page"],
+            "page_end": next_heading["page"]
+        })
+
+    return content_blocks
