@@ -21,3 +21,5 @@ def merge_spans(span1, span2, with_space=True):
         "origin": span2["origin"],
         "block_id": span2["block_id"],
     }
+
+
