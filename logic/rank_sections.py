@@ -2,38 +2,71 @@
 
 from sentence_transformers import SentenceTransformer
 from torch.nn.functional import cosine_similarity
-import torch
 from datetime import datetime
+import torch
+import re
+
+# ---------- Preprocessing Helpers ---------- #
+
+def clean_text(text):
+    text = re.sub(r'\s+', ' ', text)  # collapse whitespace
+    text = re.sub(r'•|▪|-', '', text)  # remove bullets
+    return text.strip()
+
+def is_irrelevant_heading(title):
+    lowered = title.lower()
+    return any([
+        "table of contents" in lowered,
+        "about" in lowered,
+        "disclaimer" in lowered,
+        "copyright" in lowered,
+        len(title.split()) <= 1  # filter overly generic single words like "introduction"
+    ])
+
+# ---------- Main Logic ---------- #
 
 def rank_relevant_sections(all_sections, persona, job, top_k=5):
-    model = SentenceTransformer("intfloat/e5-base")
-
-    # Step 1: Encode query
+    # 🧠 Load model
+    model = SentenceTransformer("intfloat/e5-large")  # Best model within 1GB
     query_text = f"query: {job}"
     query_embedding = model.encode(query_text, normalize_embeddings=True)
     query_tensor = torch.tensor([query_embedding])
 
-    # Step 2: Score sections
     scored = []
+
     for section in all_sections:
-        passage = f"passage: {section['content']}"
+        title = section["heading"].strip()
+        content = section["content"].strip()
+
+        # ✂️ Filter bad sections
+        if not title or not content:
+            continue
+        if is_irrelevant_heading(title):
+            continue
+
+        # 🧹 Preprocess content
+        cleaned_text = clean_text(content)
+        if len(cleaned_text.split()) < 30:
+            continue  # too short to be useful
+
+        # 🧠 Embed and score
+        passage = f"passage: {cleaned_text}"
         section_embedding = model.encode(passage, normalize_embeddings=True)
         section_tensor = torch.tensor([section_embedding])
         score = cosine_similarity(query_tensor, section_tensor).item()
 
         scored.append({
             "document": section["document"],
-            "section_title": section["heading"],
+            "section_title": title,
             "page_number": section["page_start"],
             "score": score,
-            "refined_text": section["content"].strip()
+            "refined_text": cleaned_text
         })
 
-    # Step 3: Sort and select top sections
+    # 🔢 Sort by score
     scored.sort(key=lambda x: x["score"], reverse=True)
     top_sections = scored[:top_k]
 
-    # Step 4: Create formatted output
     metadata = {
         "input_documents": list({s['document'] for s in all_sections}),
         "persona": persona,
@@ -43,12 +76,14 @@ def rank_relevant_sections(all_sections, persona, job, top_k=5):
 
     return metadata, top_sections
 
+# ---------- Print Output ---------- #
+
 def print_result(metadata, top_sections):
     print("\n" + "=" * 100)
     print("🧠  Persona-Driven Document Intelligence Output")
     print("=" * 100)
 
-    # Metadata Section
+    # Metadata
     print("\n📌 Metadata")
     print("-----------")
     print("Input Documents:")
@@ -61,10 +96,10 @@ def print_result(metadata, top_sections):
     # Extracted Sections
     print("\n🏆 Extracted Sections")
     print("----------------------")
-    for rank, section in enumerate(top_sections, 1):
-        print(f"\n{rank}. Document: {section['document']}")
+    for i, section in enumerate(top_sections, 1):
+        print(f"\n{i}. Document: {section['document']}")
         print(f"   Section Title: {section['section_title']}")
-        print(f"   Importance Rank: {rank}")
+        print(f"   Importance Rank: {i}")
         print(f"   Page Number: {section['page_number']}")
 
     # Subsection Analysis
@@ -73,5 +108,10 @@ def print_result(metadata, top_sections):
     for section in top_sections:
         print(f"\n📘 Document: {section['document']}")
         print(f"📄 Page Number: {section['page_number']}")
-        print(f"🔍 Refined Text:\n{section['refined_text']}\n")
+
+        refined_text = section["refined_text"]
+        if len(refined_text) > 1200:
+            refined_text = refined_text[:1200].strip() + "..."
+
+        print(f"🔍 Refined Text:\n{refined_text}")
         print("-" * 80)
